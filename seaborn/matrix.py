@@ -97,7 +97,7 @@ class _HeatMapper(object):
 
     def __init__(self, data, vmin, vmax, cmap, center, robust, annot, fmt,
                  annot_kws, cbar, cbar_kws,
-                 xticklabels=True, yticklabels=True, mask=None):
+                 xticklabels=True, yticklabels=True, mask=None, imputed=None, mask_imputed =None):
         """Initialize the plotting object."""
         # We always want to have a DataFrame with semantic information
         # and an ndarray to pass to matplotlib
@@ -107,10 +107,18 @@ class _HeatMapper(object):
             plot_data = np.asarray(data)
             data = pd.DataFrame(plot_data)
 
+        if isinstance(imputed, pd.DataFrame):
+            imputed_values = imputed.values
+        else:
+            imputed_values = np.asarray(imputed)
+            imputed = pd.DataFrame(imputed_values)
+
         # Validate the mask and convet to DataFrame
         mask = _matrix_mask(data, mask)
+        mask_imputed = _matrix_mask(imputed, mask_imputed)
 
         plot_data = np.ma.masked_where(np.asarray(mask), plot_data)
+        imputed_values = np.ma.masked_where(np.asarray(mask_imputed), imputed_values)
 
         # Get good names for the rows and columns
         xtickevery = 1
@@ -184,6 +192,8 @@ class _HeatMapper(object):
 
         self.annot = annot
         self.annot_data = annot_data
+        self.imputed_values = imputed_values
+        self.imputed = imputed
 
         self.fmt = fmt
         self.annot_kws = {} if annot_kws is None else annot_kws.copy()
@@ -252,13 +262,16 @@ class _HeatMapper(object):
         mesh.update_scalarmappable()
         height, width = self.annot_data.shape
         xpos, ypos = np.meshgrid(np.arange(width) + .5, np.arange(height) + .5)
-        for x, y, m, color, val in zip(xpos.flat, ypos.flat,
+        for x, y, m, color, val, imp in zip(xpos.flat, ypos.flat,
                                        mesh.get_array(), mesh.get_facecolors(),
-                                       self.annot_data.flat):
+                                       self.annot_data.flat, self.imputed_values.flat):
             if m is not np.ma.masked:
                 lum = relative_luminance(color)
                 text_color = ".15" if lum > .408 else "w"
-                annotation = ("{:" + self.fmt + "}").format(val)
+                if(imp):
+                    annotation = ("{:" + self.fmt + "}").format(val)+"*"
+                else:
+                    annotation = ("{:" + self.fmt + "}").format(val)
                 text_kwargs = dict(color=text_color, ha="center", va="center")
                 text_kwargs.update(self.annot_kws)
                 ax.text(x, y, annotation, **text_kwargs)
@@ -347,7 +360,7 @@ class _HeatMapper(object):
             self._annotate_heatmap(ax, mesh)
 
 
-def heatmap(data, vmin=None, vmax=None, cmap=None, center=None, robust=False,
+def heatmap(data, imputed=None, vmin=None, vmax=None, cmap=None, center=None, robust=False,
             annot=None, fmt=".2g", annot_kws=None,
             linewidths=0, linecolor="white",
             cbar=True, cbar_kws=None, cbar_ax=None,
@@ -534,7 +547,7 @@ def heatmap(data, vmin=None, vmax=None, cmap=None, center=None, robust=False,
     # Initialize the plotter object
     plotter = _HeatMapper(data, vmin, vmax, cmap, center, robust, annot, fmt,
                           annot_kws, cbar, cbar_kws, xticklabels,
-                          yticklabels, mask)
+                          yticklabels, mask, imputed=imputed)
 
     # Add the pcolormesh kwargs here
     kwargs["linewidths"] = linewidths
@@ -778,7 +791,7 @@ def dendrogram(data, linkage=None, axis=1, label=True, metric='euclidean',
 
 class ClusterGrid(Grid):
 
-    def __init__(self, data, pivot_kws=None, z_score=None, standard_scale=None,
+    def __init__(self, data, imputed=None, pivot_kws=None, z_score=None, standard_scale=None,
                  figsize=None, row_colors=None, col_colors=None, mask=None,
                  dendrogram_ratio=None, colors_ratio=None, cbar_pos=None):
         """Grid object for organizing clustered heatmap input on to axes"""
@@ -788,7 +801,15 @@ class ClusterGrid(Grid):
         else:
             self.data = pd.DataFrame(data)
 
+        if isinstance(imputed, pd.DataFrame):
+            self.imputed = imputed
+        else:
+            self.imputed = pd.DataFrame(imputed)
+
         self.data2d = self.format_data(self.data, pivot_kws, z_score,
+                                       standard_scale)
+
+        self.imputed2d = self.format_data(self.imputed, pivot_kws, z_score,
                                        standard_scale)
 
         self.mask = _matrix_mask(self.data2d, mask)
@@ -1136,6 +1157,7 @@ class ClusterGrid(Grid):
 
     def plot_matrix(self, colorbar_kws, xind, yind, **kws):
         self.data2d = self.data2d.iloc[yind, xind]
+        self.imputed2d = self.imputed2d.iloc[yind, xind]
         self.mask = self.mask.iloc[yind, xind]
 
         # Try to reorganize specified tick labels, if provided
@@ -1167,7 +1189,7 @@ class ClusterGrid(Grid):
 
         # Setting ax_cbar=None in clustermap call implies no colorbar
         kws.setdefault("cbar", self.ax_cbar is not None)
-        heatmap(self.data2d, ax=self.ax_heatmap, cbar_ax=self.ax_cbar,
+        heatmap(self.data2d, imputed=self.imputed2d, ax=self.ax_heatmap, cbar_ax=self.ax_cbar,
                 cbar_kws=colorbar_kws, mask=self.mask,
                 xticklabels=xtl, yticklabels=ytl, annot=annot, **kws)
 
@@ -1220,7 +1242,7 @@ class ClusterGrid(Grid):
         return self
 
 
-def clustermap(data, pivot_kws=None, method='average', metric='euclidean',
+def clustermap(data, imputed=None, pivot_kws=None, method='average', metric='euclidean',
                z_score=None, standard_scale=None, figsize=(10, 10),
                cbar_kws=None, row_cluster=True, col_cluster=True,
                row_linkage=None, col_linkage=None,
@@ -1378,7 +1400,7 @@ def clustermap(data, pivot_kws=None, method='average', metric='euclidean',
 
 
     """
-    plotter = ClusterGrid(data, pivot_kws=pivot_kws, figsize=figsize,
+    plotter = ClusterGrid(data, imputed=imputed, pivot_kws=pivot_kws, figsize=figsize,
                           row_colors=row_colors, col_colors=col_colors,
                           z_score=z_score, standard_scale=standard_scale,
                           mask=mask, dendrogram_ratio=dendrogram_ratio,
