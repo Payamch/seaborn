@@ -1157,7 +1157,8 @@ class ClusterGrid(Grid):
 
     def plot_matrix(self, colorbar_kws, xind, yind, **kws):
         self.data2d = self.data2d.iloc[yind, xind]
-        self.imputed2d = self.imputed2d.iloc[yind, xind]
+        if len(self.imputed2d.index) > 0:
+            self.imputed2d = self.imputed2d.iloc[yind, xind]
         self.mask = self.mask.iloc[yind, xind]
 
         # Try to reorganize specified tick labels, if provided
